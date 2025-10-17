@@ -1,5 +1,36 @@
 import { internalMutation } from "./_generated/server";
 import { v } from "convex/values";
+import { MutationCtx } from "./_generated/server";
+
+/**
+ * Helper function to ensure user exists in database.
+ * Creates user if not found.
+ */
+async function ensureUserExists(
+  ctx: MutationCtx,
+  clerkId: string,
+  additionalData?: { email?: string; name?: string; profileImage?: string },
+) {
+  let user = await ctx.db
+    .query("users")
+    .withIndex("by_clerkId", (q) => q.eq("clerkId", clerkId))
+    .first();
+
+  if (!user) {
+    console.log(`User ${clerkId} not found, creating automatically...`);
+    const userId = await ctx.db.insert("users", {
+      clerkId,
+      email: additionalData?.email || "unknown@example.com",
+      name: additionalData?.name || "User",
+      profileImage: additionalData?.profileImage,
+    });
+
+    user = await ctx.db.get(userId);
+    console.log(`User ${clerkId} created automatically.`);
+  }
+
+  return user;
+}
 
 /**
  * Saves image details to the Convex database. Called by `uploadImage` action.
@@ -11,13 +42,11 @@ export const saveImageDetailsToDb = internalMutation({
     url: v.string(),
   },
   handler: async (ctx, args) => {
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_clerkId", (q) => q.eq("clerkId", args.clerkId))
-      .first();
+    // Ensure user exists (create if not)
+    const user = await ensureUserExists(ctx, args.clerkId);
 
     if (!user) {
-      console.warn(`Attempted to save image for non-existent user: ${args.clerkId}`);
+      console.error(`Failed to create/find user: ${args.clerkId}`);
       return null;
     }
 
@@ -28,6 +57,8 @@ export const saveImageDetailsToDb = internalMutation({
       url: args.url,
       createdAt: Date.now(),
     });
+
+    console.log(`Image saved for user ${args.clerkId}`);
     return newImageId;
   },
 });
@@ -46,13 +77,11 @@ export const saveVideoDetailsToDb = internalMutation({
     duration: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_clerkId", (q) => q.eq("clerkId", args.clerkId))
-      .first();
+    // Ensure user exists (create if not)
+    const user = await ensureUserExists(ctx, args.clerkId);
 
     if (!user) {
-      console.warn(`Attempted to save video for non-existent user: ${args.clerkId}`);
+      console.error(`Failed to create/find user: ${args.clerkId}`);
       return null;
     }
 
@@ -67,6 +96,8 @@ export const saveVideoDetailsToDb = internalMutation({
       duration: args.duration,
       createdAt: Date.now(),
     });
+
+    console.log(`Video saved for user ${args.clerkId}`);
     return newVideoId;
   },
 });
