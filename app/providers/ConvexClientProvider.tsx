@@ -7,8 +7,8 @@ import { ConvexReactClient } from "convex/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 const convex = new ConvexReactClient(
-    process.env.NEXT_PUBLIC_CONVEX_URL ?? "http://localhost:3000"
-)
+    process.env.NEXT_PUBLIC_CONVEX_URL as string
+);
 
 const queryClient = new QueryClient();
 
