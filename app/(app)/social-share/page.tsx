@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
-import { CldImage } from "next-cloudinary";
+import { CldImage, getCldImageUrl } from "next-cloudinary";
 import { useAction, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -126,14 +126,24 @@ export default function SocialShare() {
         });
         setPreviewUrl(result.url);
       } catch (error) {
-        console.error("Transform error:", error);
-        setPreviewUrl(null);
-        toast({
-          title: "Transformation failed",
-          description:
-            error instanceof Error ? error.message : "Please try again shortly.",
-          variant: "error",
-        });
+        // Gracefully fall back to a client-generated Cloudinary URL if the Convex action is unavailable
+        console.warn("Server transform unavailable, falling back to client URL:", error);
+        try {
+          const fallbackUrl = getCldImageUrl({
+            src: uploadedImage,
+            width: dims!.width,
+            height: dims!.height,
+            crop: aiFill ? "pad" : "fill",
+            gravity: "auto",
+            background: aiFill ? "auto:predominant" : undefined,
+            format: "auto",
+            quality: "auto",
+          });
+          setPreviewUrl(fallbackUrl);
+        } catch (fallbackError) {
+          console.error("Fallback transform generation failed:", fallbackError);
+          setPreviewUrl(null);
+        }
       } finally {
         setIsTransforming(false);
       }
