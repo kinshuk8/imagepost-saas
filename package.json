@@ -4,11 +4,14 @@
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack",
-    "dev:convex": "convex dev",
+    "dev:convex": "bunx --bun convex dev",
+    "deploy:convex": "bunx --bun convex deploy",
+    "dev:all": "bunx --bun concurrently \"bunx --bun convex dev\" \"next dev\"",
     "build": "next build --turbopack",
     "start": "next start",
     "lint": "eslint",
-    "test": "vitest run"
+    "test": "vitest run",
+    "postinstall": "bunx --bun convex codegen"
   },
   "dependencies": {
     "@clerk/nextjs": "^6.33.7",
