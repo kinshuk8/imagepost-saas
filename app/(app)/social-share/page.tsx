@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { CldImage } from "next-cloudinary";
 import { useAction, useMutation } from "convex/react";
-import { api } from "@convex/_generated/api";
+import { api } from "@/convex/_generated/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -76,12 +76,8 @@ export default function SocialShare() {
   const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB limit for images
 
   const uploadImage = useAction(api.media.uploadImage);
-  // The transform action and save-variant mutation may not be in local generated types yet,
-  // so we access them via `as any` to avoid type errors.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Accessing Convex action not present in local generated types
-  const transformAction = useAction((api as any).media.transformSocialImage);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Accessing Convex mutation not present in local generated types
-  const saveVariantMutation = useMutation((api as any).mutations.saveImageVariant);
+  const transformAction = useAction(api.media.transformSocialImage);
+  const saveVariantMutation = useMutation(api.mutations.saveImageVariant);
 
   const parseRatio = (value: string): [number, number] | null => {
     const m = value.trim().match(/^(\d+)\s*:\s*(\d+)$/);
