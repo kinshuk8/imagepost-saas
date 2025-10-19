@@ -194,20 +194,27 @@ imagepost-saas/
 ### Create Social Media Images
 1. Navigate to `/social-share`
 2. Upload image (max 5 MB)
-3. Select platform format:
-   - Instagram Square (1:1)
-   - Instagram Portrait (4:5)
-   - Twitter Post (16:9)
-   - Twitter Header (3:1)
-   - Facebook Cover (205:78)
-4. Preview transformation
-5. Download optimized image
+3. Choose a preset format OR enable "Use custom ratio" (W:H)
+4. Optionally toggle "AI background fill" for smart padding and color fill
+5. The preview is generated server-side via a Convex action (debounced)
+6. Click "Save variant" to persist the transformed URL to Convex
+7. Download the optimized image
+
+Notes:
+- If the server-side transformation fails, the preview gracefully falls back to a client-side Cloudinary transform.
+- Debounced requests prevent excessive server calls when tweaking ratio/toggle inputs.
+- Saved variants appear in the `images` collection alongside uploads.
 
 ## 🔧 Important Limits
 
 - **Video Upload**: 5 MB maximum (Convex Node action limit)
 - **Image Upload**: 5 MB maximum
 - **Recommended**: Keep videos under 3 MB for best performance
+
+### AI Features
+- The Social Share page includes an "AI background fill" toggle. This uses Cloudinary's `pad` crop with `background: auto:predominant` to intelligently fill empty space.
+- No additional Cloudinary add-ons are required for this basic AI-assisted transform.
+- If you plan to enable advanced GenAI features (background removal, generative expand, etc.), ensure the corresponding Cloudinary add-ons are enabled on your account and update the Convex action to include those transformations.
 
 ### Compressing Videos
 

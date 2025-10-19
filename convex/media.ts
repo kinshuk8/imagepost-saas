@@ -227,6 +227,47 @@ export const uploadVideo = action({
   },
 });
 
+// Social image transformation action for server-side URL generation
+export const transformSocialImage = action({
+  args: {
+    publicId: v.string(),
+    width: v.number(),
+    height: v.number(),
+    cropMode: v.optional(v.string()), // "fill" | "pad"
+    aiBackgroundFill: v.optional(v.boolean()),
+    format: v.optional(v.string()),
+    quality: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Unauthorized: Must be logged in to transform images.");
+    }
+
+    const crop = args.cropMode ?? (args.aiBackgroundFill ? "pad" : "fill");
+
+    try {
+      const url = cloudinary.url(args.publicId, {
+        width: args.width,
+        height: args.height,
+        crop,
+        gravity: "auto",
+        background: args.aiBackgroundFill ? "auto:predominant" : undefined,
+        fetch_format: args.format ?? "auto",
+        quality: args.quality ?? "auto",
+        secure: true,
+      });
+
+      return { url };
+    } catch (error) {
+      console.error("Cloudinary Transform Error:", error);
+      throw new Error(
+        error instanceof Error ? error.message : "Failed to generate transform URL",
+      );
+    }
+  },
+});
+
 // Optional: If you need to expose Cloudinary asset info from an action
 export const getCloudinaryAssetInfo = action({
   args: {

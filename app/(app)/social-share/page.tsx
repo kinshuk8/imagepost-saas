@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import { CldImage } from "next-cloudinary";
-import { useAction } from "convex/react";
+import { useAction, useMutation } from "convex/react";
 import { api } from "@convex/_generated/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/select";
 import { Progress } from "@/components/ui/progress";
 import { Spinner } from "@/components/ui/spinner";
+import { useToast } from "@/components/ui/toast";
 import {
   Upload,
   Download,
@@ -24,6 +25,7 @@ import {
   AlertCircle,
   CheckCircle2,
   RefreshCw,
+  Save,
 } from "lucide-react";
 
 const socialFormats = {
@@ -44,11 +46,18 @@ const socialFormats = {
 
 type SocialFormat = keyof typeof socialFormats;
 
+type SaveState = "idle" | "saving" | "saved" | "error";
+
 export default function SocialShare() {
   const [uploadedImage, setUploadedImage] = useState<string | null>(null);
   const [selectedFormat, setSelectedFormat] = useState<SocialFormat>(
     "Instagram Square (1:1)",
   );
+  const [useCustomRatio, setUseCustomRatio] = useState(false);
+  const [customRatio, setCustomRatio] = useState("");
+  const [ratioError, setRatioError] = useState<string | null>(null);
+  const [aiFill, setAiFill] = useState(false);
+
   const [isUploading, setIsUploading] = useState(false);
   const [isTransforming, setIsTransforming] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<
@@ -57,18 +66,86 @@ export default function SocialShare() {
   const [errorMessage, setErrorMessage] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [saveState, setSaveState] = useState<SaveState>("idle");
 
   const imageRef = useRef<HTMLImageElement>(null);
+
+  const { toast } = useToast();
 
   const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB limit for images
 
   const uploadImage = useAction(api.media.uploadImage);
+  // The transform action and save-variant mutation may not be in local generated types yet,
+  // so we access them via `as any` to avoid type errors.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Accessing Convex action not present in local generated types
+  const transformAction = useAction((api as any).media.transformSocialImage);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Accessing Convex mutation not present in local generated types
+  const saveVariantMutation = useMutation((api as any).mutations.saveImageVariant);
 
-  useEffect(() => {
-    if (uploadedImage) {
-      setIsTransforming(true);
+  const parseRatio = (value: string): [number, number] | null => {
+    const m = value.trim().match(/^(\d+)\s*:\s*(\d+)$/);
+    if (!m) return null;
+    const w = parseInt(m[1], 10);
+    const h = parseInt(m[2], 10);
+    if (w <= 0 || h <= 0) return null;
+    return [w, h];
+  };
+
+  const getTargetDims = () => {
+    if (useCustomRatio) {
+      const parsed = parseRatio(customRatio);
+      if (!parsed) return null;
+      const [rw, rh] = parsed;
+      const baseWidth = 1080;
+      const width = baseWidth;
+      const height = Math.round((baseWidth * rh) / rw);
+      return { width, height, aspectRatio: `${rw}:${rh}` };
     }
-  }, [selectedFormat, uploadedImage]);
+    const f = socialFormats[selectedFormat];
+    return { width: f.width, height: f.height, aspectRatio: f.aspectRatio };
+  };
+
+  // Debounced transform when options change
+  useEffect(() => {
+    if (!uploadedImage) return;
+
+    const dims = getTargetDims();
+    if (useCustomRatio && !dims) {
+      setRatioError("Invalid ratio. Use W:H (e.g. 4:5)");
+      return;
+    }
+    setRatioError(null);
+
+    setIsTransforming(true);
+    setPreviewUrl(null);
+
+    const t = window.setTimeout(async () => {
+      try {
+        const result: { url: string } = await transformAction({
+          publicId: uploadedImage,
+          width: dims!.width,
+          height: dims!.height,
+          aiBackgroundFill: aiFill,
+        });
+        setPreviewUrl(result.url);
+      } catch (error) {
+        console.error("Transform error:", error);
+        setPreviewUrl(null);
+        toast({
+          title: "Transformation failed",
+          description:
+            error instanceof Error ? error.message : "Please try again shortly.",
+          variant: "error",
+        });
+      } finally {
+        setIsTransforming(false);
+      }
+    }, 400);
+
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uploadedImage, selectedFormat, useCustomRatio, customRatio, aiFill]);
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -87,6 +164,14 @@ export default function SocialShare() {
         `File size too large. Please select an image under ${MAX_FILE_SIZE / (1024 * 1024)} MB.`,
       );
       setUploadStatus("error");
+      toast({
+        title: "File too large",
+        description: `Please select an image under ${(
+          MAX_FILE_SIZE /
+          (1024 * 1024)
+        ).toFixed(0)} MB.`,
+        variant: "error",
+      });
       return;
     }
 
@@ -101,6 +186,7 @@ export default function SocialShare() {
         setErrorMessage("Failed to read file. Please try again.");
         setUploadStatus("error");
         setIsUploading(false);
+        toast({ title: "Read error", description: "Try again.", variant: "error" });
       };
 
       reader.onload = async () => {
@@ -112,14 +198,20 @@ export default function SocialShare() {
           });
           setUploadedImage(result.publicId);
           setUploadStatus("success");
+          toast({
+            title: "Upload successful",
+            description: "Image uploaded. Select a format to transform.",
+            variant: "success",
+          });
         } catch (error) {
           console.error("Error uploading image:", error);
-          setErrorMessage(
+          const message =
             error instanceof Error
               ? error.message
-              : "Failed to upload image. Please try again.",
-          );
+              : "Failed to upload image. Please try again.";
+          setErrorMessage(message);
           setUploadStatus("error");
+          toast({ title: "Upload failed", description: message, variant: "error" });
         } finally {
           setIsUploading(false);
         }
@@ -131,6 +223,7 @@ export default function SocialShare() {
       setErrorMessage("Failed to process file. Please try again.");
       setUploadStatus("error");
       setIsUploading(false);
+      toast({ title: "Processing failed", description: "Try again.", variant: "error" });
     }
   };
 
@@ -145,7 +238,11 @@ export default function SocialShare() {
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `${selectedFormat.replace(/\s+/g, "_").toLowerCase()}.png`;
+      const dims = getTargetDims();
+      const name = useCustomRatio && dims
+        ? `custom_${dims.aspectRatio.replace(":", "-")}`
+        : selectedFormat.replace(/\s+/g, "_").toLowerCase();
+      link.download = `${name}.png`;
       document.body.appendChild(link);
       link.click();
       window.URL.revokeObjectURL(url);
@@ -154,6 +251,7 @@ export default function SocialShare() {
       console.error("Download error:", error);
       setErrorMessage("Failed to download image. Please try again.");
       setUploadStatus("error");
+      toast({ title: "Download failed", description: "Try again.", variant: "error" });
     } finally {
       setIsDownloading(false);
     }
@@ -165,7 +263,36 @@ export default function SocialShare() {
     setUploadStatus("idle");
     setErrorMessage("");
     setSelectedFormat("Instagram Square (1:1)");
+    setUseCustomRatio(false);
+    setCustomRatio("");
+    setAiFill(false);
+    setPreviewUrl(null);
+    setSaveState("idle");
   };
+
+  const handleSaveVariant = async () => {
+    if (!uploadedImage || !previewUrl) return;
+    setSaveState("saving");
+    try {
+      await saveVariantMutation({
+        cloudinaryPublicId: uploadedImage,
+        url: previewUrl,
+      });
+      setSaveState("saved");
+      toast({ title: "Variant saved", variant: "success" });
+      window.setTimeout(() => setSaveState("idle"), 1500);
+    } catch (error) {
+      console.error("Save variant failed:", error);
+      setSaveState("error");
+      toast({
+        title: "Failed to save variant",
+        description: error instanceof Error ? error.message : "",
+        variant: "error",
+      });
+    }
+  };
+
+  const dims = getTargetDims();
 
   return (
     <div className="container mx-auto p-4 max-w-4xl">
@@ -188,9 +315,7 @@ export default function SocialShare() {
           {!uploadedImage && (
             <div className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="image-upload">
-                  Choose an image file (max 5 MB)
-                </Label>
+                <Label htmlFor="image-upload">Choose an image file (max 5 MB)</Label>
                 <Input
                   id="image-upload"
                   type="file"
@@ -201,8 +326,7 @@ export default function SocialShare() {
                 />
                 {selectedFile && (
                   <p className="text-sm text-muted-foreground">
-                    Selected: {selectedFile.name} (
-                    {(selectedFile.size / (1024 * 1024)).toFixed(2)} MB)
+                    Selected: {selectedFile.name} ({(selectedFile.size / (1024 * 1024)).toFixed(2)} MB)
                   </p>
                 )}
               </div>
@@ -212,12 +336,8 @@ export default function SocialShare() {
                 <div className="flex items-start gap-2 p-4 bg-destructive/10 border border-destructive/20 rounded-lg">
                   <AlertCircle className="h-5 w-5 text-destructive mt-0.5" />
                   <div className="flex-1">
-                    <p className="text-sm font-medium text-destructive">
-                      Upload Failed
-                    </p>
-                    <p className="text-sm text-destructive/90 mt-1">
-                      {errorMessage}
-                    </p>
+                    <p className="text-sm font-medium text-destructive">Upload Failed</p>
+                    <p className="text-sm text-destructive/90 mt-1">{errorMessage}</p>
                   </div>
                 </div>
               )}
@@ -227,9 +347,7 @@ export default function SocialShare() {
                 <div className="space-y-3 p-4 bg-muted/50 rounded-lg">
                   <div className="flex items-center justify-center gap-3">
                     <Spinner size="md" />
-                    <p className="text-sm font-medium">
-                      Uploading image to Cloudinary...
-                    </p>
+                    <p className="text-sm font-medium">Uploading image to Cloudinary...</p>
                   </div>
                   <Progress value={100} className="w-full animate-pulse" />
                 </div>
@@ -270,34 +388,81 @@ export default function SocialShare() {
                 </div>
               )}
 
-              {/* Format Selection */}
-              <div>
-                <CardTitle className="mb-4 flex items-center gap-2">
-                  Select Social Media Format
-                </CardTitle>
-                <div className="space-y-2">
-                  <Label htmlFor="format-select">Format</Label>
-                  <Select
-                    value={selectedFormat}
-                    onValueChange={(value) =>
-                      setSelectedFormat(value as SocialFormat)
-                    }
-                  >
-                    <SelectTrigger id="format-select" className="w-full">
-                      <SelectValue placeholder="Select a format" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {Object.keys(socialFormats).map((format) => (
-                        <SelectItem key={format} value={format}>
-                          {format}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground">
-                    Dimensions: {socialFormats[selectedFormat].width} x{" "}
-                    {socialFormats[selectedFormat].height} px
-                  </p>
+              {/* Controls */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Format Selection */}
+                <div>
+                  <CardTitle className="mb-4 flex items-center gap-2">
+                    Select Social Media Format
+                  </CardTitle>
+                  <div className="space-y-2">
+                    <Label htmlFor="format-select">Format</Label>
+                    <Select
+                      value={selectedFormat}
+                      onValueChange={(value) => setSelectedFormat(value as SocialFormat)}
+                      disabled={useCustomRatio}
+                    >
+                      <SelectTrigger id="format-select" className="w-full">
+                        <SelectValue placeholder="Select a format" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {Object.keys(socialFormats).map((format) => (
+                          <SelectItem key={format} value={format}>
+                            {format}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">
+                      Dimensions: {socialFormats[selectedFormat].width} x {socialFormats[selectedFormat].height} px
+                    </p>
+                  </div>
+                </div>
+
+                {/* Customization */}
+                <div className="space-y-3">
+                  <CardTitle className="mb-1 flex items-center gap-2">Customization</CardTitle>
+                  <div className="flex items-center gap-2">
+                    <input
+                      id="toggle-custom"
+                      type="checkbox"
+                      className="h-4 w-4"
+                      checked={useCustomRatio}
+                      onChange={(e) => setUseCustomRatio(e.target.checked)}
+                    />
+                    <Label htmlFor="toggle-custom">Use custom ratio</Label>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="ratio-input">Custom ratio (W:H)</Label>
+                    <Input
+                      id="ratio-input"
+                      placeholder="e.g. 4:5"
+                      value={customRatio}
+                      disabled={!useCustomRatio}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setCustomRatio(val);
+                        if (!val) {
+                          setRatioError(null);
+                        } else {
+                          setRatioError(parseRatio(val) ? null : "Invalid ratio. Use W:H (e.g. 4:5)");
+                        }
+                      }}
+                    />
+                    {ratioError && (
+                      <p role="alert" className="text-xs text-destructive">{ratioError}</p>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      id="ai-fill"
+                      type="checkbox"
+                      className="h-4 w-4"
+                      checked={aiFill}
+                      onChange={(e) => setAiFill(e.target.checked)}
+                    />
+                    <Label htmlFor="ai-fill">AI background fill (pad & auto colors)</Label>
+                  </div>
                 </div>
               </div>
 
@@ -309,29 +474,43 @@ export default function SocialShare() {
                     <div className="absolute inset-0 flex items-center justify-center bg-background/80 backdrop-blur-sm z-10 rounded-lg">
                       <div className="flex flex-col items-center gap-2">
                         <Spinner size="lg" />
-                        <p className="text-sm text-muted-foreground">
-                          Transforming image...
-                        </p>
+                        <p className="text-sm text-muted-foreground">Transforming image...</p>
                       </div>
                     </div>
                   )}
-                  <CldImage
-                    width={socialFormats[selectedFormat].width}
-                    height={socialFormats[selectedFormat].height}
-                    src={uploadedImage}
-                    sizes="100vw"
-                    alt="transformed image"
-                    crop="fill"
-                    aspectRatio={socialFormats[selectedFormat].aspectRatio}
-                    gravity="auto"
-                    ref={imageRef}
-                    onLoad={() => setIsTransforming(false)}
-                    className="rounded-lg max-w-full h-auto"
-                  />
+
+                  {previewUrl ? (
+                    // Use server-generated transformation URL
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      ref={imageRef}
+                      src={previewUrl}
+                      width={dims?.width}
+                      height={dims?.height}
+                      alt="transformed image"
+                      className="rounded-lg max-w-full h-auto"
+                      onLoad={() => setIsTransforming(false)}
+                    />
+                  ) : (
+                    // Fallback to client-side Cloudinary transform if server transform fails
+                    <CldImage
+                      width={socialFormats[selectedFormat].width}
+                      height={socialFormats[selectedFormat].height}
+                      src={uploadedImage}
+                      sizes="100vw"
+                      alt="transformed image"
+                      crop={aiFill ? "pad" : "fill"}
+                      aspectRatio={socialFormats[selectedFormat].aspectRatio}
+                      gravity="auto"
+                      ref={imageRef}
+                      onLoad={() => setIsTransforming(false)}
+                      className="rounded-lg max-w-full h-auto"
+                    />
+                  )}
                 </div>
 
                 {/* Action Buttons */}
-                <div className="flex gap-3 mt-6">
+                <div className="flex flex-col sm:flex-row gap-3 mt-6">
                   <Button
                     onClick={handleDownload}
                     size="lg"
@@ -346,7 +525,31 @@ export default function SocialShare() {
                     ) : (
                       <>
                         <Download className="mr-2 h-4 w-4" />
-                        Download for {selectedFormat}
+                        Download for {useCustomRatio && dims ? `custom ${dims.aspectRatio}` : selectedFormat}
+                      </>
+                    )}
+                  </Button>
+                  <Button
+                    onClick={handleSaveVariant}
+                    size="lg"
+                    className="flex-1"
+                    variant="secondary"
+                    disabled={!previewUrl || isTransforming || saveState === "saving"}
+                  >
+                    {saveState === "saving" ? (
+                      <>
+                        <Spinner size="sm" className="mr-2" />
+                        Saving...
+                      </>
+                    ) : saveState === "saved" ? (
+                      <>
+                        <CheckCircle2 className="mr-2 h-4 w-4" />
+                        Saved
+                      </>
+                    ) : (
+                      <>
+                        <Save className="mr-2 h-4 w-4" />
+                        Save variant
                       </>
                     )}
                   </Button>
@@ -375,7 +578,7 @@ export default function SocialShare() {
             <li>• Maximum file size: 5 MB</li>
             <li>• Supported formats: JPG, PNG, WebP, GIF</li>
             <li>• Images are automatically optimized by Cloudinary</li>
-            <li>• Preview updates instantly when changing formats</li>
+            <li>• Preview updates when you change format, ratio, or AI toggle</li>
           </ul>
         </CardContent>
       </Card>

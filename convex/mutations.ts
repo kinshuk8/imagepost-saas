@@ -1,4 +1,4 @@
-import { internalMutation } from "./_generated/server";
+import { internalMutation, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { MutationCtx } from "./_generated/server";
 
@@ -99,5 +99,32 @@ export const saveVideoDetailsToDb = internalMutation({
 
     console.log(`Video saved for user ${args.clerkId}`);
     return newVideoId;
+  },
+});
+
+// Public mutation to save a transformed image variant for the current user
+export const saveImageVariant = mutation({
+  args: {
+    cloudinaryPublicId: v.string(),
+    url: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Unauthorized: Must be logged in to save variants.");
+    }
+
+    const user = await ensureUserExists(ctx, identity.subject);
+    if (!user) return null;
+
+    const newImageId = await ctx.db.insert("images", {
+      userId: user._id,
+      clerkId: identity.subject,
+      cloudinaryPublicId: args.cloudinaryPublicId,
+      url: args.url,
+      createdAt: Date.now(),
+    });
+
+    return newImageId;
   },
 });
