@@ -11,7 +11,7 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
-    "postinstall": "bunx --bun convex codegen"
+    "postinstall": "bunx --bun convex codegen || echo \"Skipping convex codegen (no access token)\""
   },
   "dependencies": {
     "@clerk/nextjs": "^6.33.7",
