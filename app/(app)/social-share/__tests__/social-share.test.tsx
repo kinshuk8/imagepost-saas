@@ -1,7 +1,7 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import SocialShare from '../page';
-import { ToastProvider } from '@/components/ui/toast';
+import { Toaster } from '@/components/ui/toaster';
 import { useAction, useMutation } from 'convex/react';
 import userEvent from '@testing-library/user-event';
 import { vi } from 'vitest';
@@ -14,7 +14,12 @@ describe('SocialShare', () => {
   });
 
   function renderWithProviders(ui: React.ReactNode) {
-    return render(<ToastProvider>{ui}</ToastProvider>);
+    return render(
+      <>
+        <Toaster />
+        {ui}
+      </>
+    );
   }
 
   test('shows validation error for invalid custom ratio', async () => {
